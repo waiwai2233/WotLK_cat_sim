@@ -221,6 +221,7 @@ class Simulation():
         self.latency = latency
         self.trinkets = trinkets
         self.mangle_idol = mangle_idol
+        self.ff_delay = 0.2
         self.params = copy.deepcopy(self.default_params)
         self.strategy = copy.deepcopy(self.default_strategy)
 
@@ -909,23 +910,44 @@ class Simulation():
         projected_energy = (
             self.player.energy + 10 * (future_time - current_time)
         )
-        furor_cap = min(20 * self.player.furor, 85)
+        furor_cap = min(20 * self.player.furor, 75)
         rip_refresh_pending = (
             self.rip_debuff and (self.player.combo_points == 5)
             and (self.rip_end < self.fight_length - 10)
         )
-        weave_end = future_time + 4.5 + 2 * self.latency
+        # comment out original weave end
+        # weave_end = future_time + 4.5 + 2 * self.latency
 
-        # Calculate maximum Energy level for initiating a weave
-        weave_energy = furor_cap - 30 - 20 * self.latency
+        # at least two gcds in bear, aligned with faerie fire
+        weave_end = max(
+            future_time + 5.5 + 2 * self.latency + self.ff_delay,
+            (future_time + self.player.faerie_fire_cd + 1.0 + 1.5 
+                + 2 * self.latency + self.ff_delay)
+        )
+        # calculate maximum Energy level for initiating a weave,
+        # aligned with faerie fire
+        weave_energy = min(
+            furor_cap - 40 - 20 * self.latency - 10 * self.ff_delay,
+            (furor_cap - 10 * self.player.faerie_fire_cd - 10
+                - 20 * self.latency - 10 * self.ff_delay)
+        )
+
+        # allow maul fire weave
+        # weave_end = (
+        #     future_time + self.player.faerie_fire_cd + 1.0 + 1.5 + 2 * self.latency + self.ff_delay
+        # )
+
+        # weave_energy = (
+        #     furor_cap - 10 * self.player.faerie_fire_cd - 10 - 20 * self.latency - 10 * self.ff_delay
+        # )
 
         # With 4/5 or 5/5 Furor, force 2-GCD bearweaves whenever possible
-        if self.player.furor > 3:
-            weave_energy -= 15
+        # if self.player.furor >= 3:
+        #     weave_energy -= 15  # one of the gcd is a mangle
 
             # Force a 3-GCD weave when stacking Lacerates for the first time
-            if self.strategy['lacerate_prio'] and (not self.lacerate_debuff):
-                weave_energy -= 15
+            # if self.strategy['lacerate_prio'] and (not self.lacerate_debuff):
+            #     weave_energy -= 15
 
         # Bearweave decision tree
         can_weave = (
@@ -934,6 +956,8 @@ class Simulation():
             and (not self.player.omen_proc)
             and ((not rip_refresh_pending) or (self.rip_end >= weave_end))
             and (not self.player.berserk)
+            # only allow 2-GCD bear weave
+            and (self.player.faerie_fire_cd + self.ff_delay >= 3.0)  
         )
 
         if can_weave and (not self.strategy['lacerate_prio']):
@@ -948,6 +972,9 @@ class Simulation():
             can_weave = (
                 weave_end + energy_to_dump // 42 < self.fight_length
             )
+
+        # forbid weave before 9s to end of fight
+        can_weave = can_weave and (current_time < self.fight_length - 9)
 
         return can_weave
 
@@ -1088,6 +1115,8 @@ class Simulation():
             and self.strategy['use_bite'] and self.can_bite(time)
         )
         bite_now = (bite_before_rip or bite_at_end) and (energy < 67)
+        # Determine whether we should initative a bearweave
+        # bite_next = (bite_before_rip or bite_at_end) and (energy > 51.99)
 
         if bite_now and self.player.omen_proc:
             # _, shred_dpe = self.calc_builder_dpe()
@@ -1226,7 +1255,7 @@ class Simulation():
         pending_actions.sort()
 
         # Allow for bearweaving if the next pending action is >= 4.5s away
-        furor_cap = min(20 * self.player.furor, 85)
+        furor_cap = min(20 * self.player.furor, 75)
         bearweave_now = self.should_bearweave(time)
 
         # If we're maintaining Lacerate, then allow for emergency bearweaves
@@ -1308,21 +1337,25 @@ class Simulation():
             # Rage to Mangle or Maul, or (c) we don't have enough time or
             # Energy leeway to spend an additional GCD in Dire Bear Form.
             shift_now = (
-                (energy + 15 + 10 * self.latency > furor_cap)
-                or (rip_refresh_pending and (self.rip_end < time + 3.0))
-                or self.player.berserk
+                # (energy + 15 + 10 * self.latency > furor_cap)
+                # or (rip_refresh_pending and (self.rip_end < time + 3.0))
+                # or self.player.berserk
+                (time - self.player.last_shift < 1.5 and self.player.omen_proc) or
+                (self.player.faerie_fire_bear)  # previous cast is bear fire
             )
             shift_next = (
-                (energy + 30 + 10 * self.latency > furor_cap)
-                or (rip_refresh_pending and (self.rip_end < time + 4.5))
-                or self.player.berserk
+                # (energy + 30 + 10 * self.latency > furor_cap)
+                # or (rip_refresh_pending and (self.rip_end < time + 4.5))
+                # or self.player.berserk
+                (time - self.player.last_shift < 1.5 and self.player.omen_proc) or 
+                (self.player.faerie_fire_bear)  # previous cast is bear fire
             )
 
             if self.strategy['powerbear']:
                 powerbear_now = (not shift_now) and (self.player.rage < 10)
             else:
                 powerbear_now = False
-                shift_now = shift_now or (self.player.rage < 10)
+                # shift_now = shift_now or (self.player.rage < 10)
 
             # lacerate_now = self.strategy['lacerate_prio'] and (
             #     (not self.lacerate_debuff) or (self.lacerate_stacks < 5)
@@ -1331,14 +1364,30 @@ class Simulation():
             build_lacerate = (
                 (not self.lacerate_debuff) or (self.lacerate_stacks < 5)
             )
-            maintain_lacerate = (not build_lacerate) and (
+            build_lacerate = False
+            maintain_lacerate = False and (not build_lacerate) and (
                 (self.lacerate_end - time <= self.strategy['lacerate_time'])
                 and ((self.player.rage < 38) or shift_next)
                 and (self.lacerate_end < self.fight_length)
             )
+            mangle_now = (
+                (self.player.rage >= 15) and (self.player.mangle_cd < 1e-9) 
+                and (self.player.faerie_fire_cd + self.latency + self.ff_delay >= 1.5)
+                and (energy + 25 + 10 * self.latency + 10*self.ff_delay <= furor_cap)
+                and not ((rip_refresh_pending and (self.rip_end < time + 4.0 + self.ff_delay)))
+            )
+            # lacerate_now = (
+            #     self.strategy['lacerate_prio']
+            #     and (build_lacerate or maintain_lacerate)
+            # )
             lacerate_now = (
-                self.strategy['lacerate_prio']
-                and (build_lacerate or maintain_lacerate)
+                (self.player.rage >= 13)
+                and (self.player.faerie_fire_cd + self.latency + self.ff_delay >= 1.5)
+                and (energy + 25 + 10 * self.latency + 10*self.ff_delay <= furor_cap)
+                and not ((rip_refresh_pending and (self.rip_end < time + 4.0 + self.ff_delay)))
+            )
+            ff_now = (
+                self.player.faerie_fire_cd < 1e-9
             )
             emergency_lacerate = (
                 self.strategy['lacerate_prio'] and self.lacerate_debuff
@@ -1346,8 +1395,10 @@ class Simulation():
                 and (self.lacerate_end < self.fight_length)
             )
 
-            if (not self.strategy['lacerate_prio']) or (not lacerate_now):
-                shift_now = shift_now or self.player.omen_proc
+            # if (not self.strategy['lacerate_prio']) or (not lacerate_now):
+            #     shift_now = shift_now or self.player.omen_proc
+            if time - self.player.last_shift < 1.5 and self.player.omen_proc:
+                shift_now = True
 
             # Also add an end of fight condition to prevent extending a weave
             # if we don't have enough time to spend the pooled Energy thus far.
@@ -1358,6 +1409,8 @@ class Simulation():
 
             if emergency_lacerate and (self.player.rage >= 13):
                 return self.lacerate(time)
+            elif ff_now:
+                return self.player.faerie_fire()
             elif shift_now:
                 # If we are resetting our swing timer using Albino Snake or a
                 # duplicate weapon swap, then do an additional check here to
@@ -1376,17 +1429,22 @@ class Simulation():
                     and (self.swing_times[0] < next_cat_swing)
                 )
 
+                can_delay_shift = (
+                    (not (time - self.player.last_shift < 1.5 and self.player.omen_proc))
+                        and can_delay_shift
+                )
+
                 if can_delay_shift:
                     time_to_next_action = self.swing_times[0] - time
                 else:
                     self.player.ready_to_shift = True
             elif powerbear_now:
                 self.player.shift(time, powershift=True)
-            elif lacerate_now and (self.player.rage >= 13):
-                return self.lacerate(time)
-            elif (self.player.rage >= 15) and (self.player.mangle_cd < 1e-9):
+            # elif lacerate_now and (self.player.rage >= 13):
+            #     return self.lacerate(time)
+            elif mangle_now:
                 return self.mangle(time)
-            elif self.player.rage >= 13:
+            elif lacerate_now:
                 return self.lacerate(time)
             else:
                 time_to_next_action = self.swing_times[0] - time
@@ -1949,7 +2007,7 @@ class Simulation():
                     # Dire Bear Form once the GCD expires, then only Maul if we
                     # will be left with enough Rage to cast Mangle or Lacerate
                     # on that global.
-                    furor_cap = min(20 * self.player.furor, 85)
+                    furor_cap = min(20 * self.player.furor, 75)
                     rip_refresh_pending = (
                         self.rip_debuff
                         and (self.rip_end < self.fight_length - 10)
@@ -1958,12 +2016,16 @@ class Simulation():
                         furor_cap - 15
                         - 10 * (self.player.gcd + self.latency)
                     )
-                    shift_next = (self.player.energy > energy_leeway)
+                    shift_next = (
+                        # (self.player.energy > energy_leeway) or (self.player.omen_proc)
+                        (time - self.player.last_shift < 1.5 and self.player.omen_proc) or 
+                        (self.player.faerie_fire_bear) # if the last cast is bear fire
+                    )      
 
-                    if rip_refresh_pending:
-                        shift_next = shift_next or (
-                            self.rip_end < time + self.player.gcd + 3.0
-                        )
+                    # if rip_refresh_pending:
+                    #     shift_next = shift_next or (
+                    #         self.rip_end < time + self.player.gcd + 3.0
+                    #     )
 
                     if self.strategy['lacerate_prio']:
                         lacerate_leeway = (
@@ -1987,17 +2049,27 @@ class Simulation():
                             or (time - self.player.last_shift < 1.5)
                         )
                     else:
-                        mangle_next = (self.player.mangle_cd < self.player.gcd)
+                        mangle_next = (
+                            ((self.player.mangle_cd < self.player.gcd)
+                            or (time - self.player.last_shift < 1.5))
+                            and (self.player.faerie_fire_cd + self.latency 
+                                     + self.ff_delay >= 1.5 + self.player.gcd)
+                        )
                         lacerate_next = self.lacerate_debuff and (
                             (self.lacerate_stacks < 5) or
                             (self.lacerate_end < time + self.player.gcd + 4.5)
                         )
+                        lacerate_next = False
                         emergency_lacerate_next = False
 
                     if emergency_lacerate_next:
                         maul_rage_thresh = 23
                     elif shift_next:
-                        maul_rage_thresh = 10
+                        # if bear fire is used, forbid maul
+                        if self.player.faerie_fire_bear:
+                            maul_rage_thresh = 101
+                        else:
+                            maul_rage_thresh = 10
                     elif mangle_next:
                         maul_rage_thresh = 25
                     elif lacerate_next:

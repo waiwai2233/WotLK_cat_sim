@@ -759,7 +759,7 @@ iteration_input = dbc.Col([
                     'label': ' prioritize Lacerate maintenance over Mangle',
                     'value': 'lacerate_prio'
                 }],
-                value=['lacerate_prio'], id='lacerate_prio',
+                value=[], id='lacerate_prio',
                 style={'marginTop': '1%', 'marginLeft': '5%'}
             ),
             dbc.Collapse(
@@ -2168,7 +2168,7 @@ def disable_options(
 
     # Disable bearweave and flowershift in UI given recent Blizzard changes
     flowershift_options['disabled'] = True
-    bearweave_options['disabled'] = True
+    # bearweave_options['disabled'] = True
 
     return (
         bool(bearweave), bool(biteweave), 'berserk' in binary_talents,

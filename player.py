@@ -1005,6 +1005,8 @@ class Player():
         self.five_second_rule = True
         self.last_shift = time
         self.ready_to_shift = False
+        # Store whether the last cast is faerie fire bear
+        self.faerie_fire_bear = False
 
         # Pop a Dark Rune if we can get full value from it
         if self.use_rune():
@@ -1068,6 +1070,8 @@ class Player():
         )
         if self.enrage:
             damage_done *= 1.15
+        
+        self.faerie_fire_bear = True
         self.dmg_breakdown['Faerie Fire (Bear)']['casts'] += 1    
         self.dmg_breakdown['Faerie Fire (Bear)']['damage'] += damage_done  
         if self.log:
